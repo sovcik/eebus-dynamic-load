@@ -1,0 +1,1 @@
+git+https://github.com/ULudo/eebus-sdk.git@48c854639ebd70b7250eb7c8273bcd9dad714351
