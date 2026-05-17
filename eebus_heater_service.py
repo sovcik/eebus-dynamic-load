@@ -52,6 +52,7 @@ def format_lcp_message(payload: Mapping[str, Any]) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="EEBus heater service")
     parser.add_argument("--identity", required=True, help="Path to eebus-sdk identity.json")
+    parser.add_argument("--peer-ski", required=True, help="SKI of the coupled EEBus peer")
     parser.add_argument("--interface-ip", help="IPv4 interface address for discovery advertisement")
     parser.add_argument("--bind-host", default="0.0.0.0", help="Host interface to bind SHIP listener to")
     parser.add_argument("--port", type=int, default=4712, help="SHIP listener port")
@@ -87,6 +88,7 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
             port=args.port,
             path=args.path,
             device_id=args.device_id,
+            trusted_client_skis=(args.peer_ski,),
         )
     )
     return RuntimeHandles(announcer=announcer, listener=listener)
