@@ -1,0 +1,18 @@
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+
+[dn]
+C = DE
+CN = LY21JS.cls
+serialNumber = 1
+O = HEMS
+OU = HEMS
+
+[v3_req]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = clientAuth,serverAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
