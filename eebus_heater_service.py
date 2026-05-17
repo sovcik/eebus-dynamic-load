@@ -12,6 +12,8 @@ DISCOVERY_COMMANDS = {
     "nodeManagementDetailedDiscoveryData",
     "nodeManagementUseCaseData",
 }
+PAIRING_TIMEOUT_SECONDS = 120
+PAIRING_CONFIRMATION_INPUTS = {"y", "yes"}
 
 
 @dataclass(slots=True)
@@ -139,7 +141,7 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
         port=service.port,
         path=service.path,
         server_name=service.server_name(),
-        pairing_wait_seconds=120,
+        pairing_wait_seconds=PAIRING_TIMEOUT_SECONDS,
     )
     try:
         session = await sdk["ShipSession"].connect(config, identity, trust)
@@ -155,21 +157,21 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
     sdk = _load_sdk()
     runtime = build_runtime(args)
     selected_ski: str | None = None
-    deadline = asyncio.get_running_loop().time() + 120.0
+    deadline = asyncio.get_running_loop().time() + float(PAIRING_TIMEOUT_SECONDS)
     await runtime.listener.start()
     await runtime.announcer.start()
     try:
-        print("Pairing mode: waiting for pairing requests for up to 120 seconds.", flush=True)
+        print(f"Pairing mode: waiting for pairing requests for up to {PAIRING_TIMEOUT_SECONDS} seconds.", flush=True)
         events = runtime.listener.events()
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                print("Pairing mode timeout after 120 seconds.", flush=True)
+                print(f"Pairing mode timeout after {PAIRING_TIMEOUT_SECONDS} seconds.", flush=True)
                 return 1
             try:
                 event = await asyncio.wait_for(anext(events), timeout=remaining)
             except TimeoutError:
-                print("Pairing mode timeout after 120 seconds.", flush=True)
+                print(f"Pairing mode timeout after {PAIRING_TIMEOUT_SECONDS} seconds.", flush=True)
                 return 1
 
             if event.kind == "connected":
@@ -178,10 +180,9 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
                 display_ski = normalized_ski or str(raw_ski or "UNKNOWN")
                 print(f"Pairing request received from SKI: {display_ski}", flush=True)
                 response = await asyncio.to_thread(input, f"Pair with SKI {display_ski}? [y/N]: ")
-                if response.strip().lower() in {"y", "yes"} and normalized_ski is not None:
+                if response.strip().lower() in PAIRING_CONFIRMATION_INPUTS and normalized_ski is not None:
                     selected_ski = normalized_ski
                     print(f"Selected SKI {selected_ski}. Waiting for pairing to complete...", flush=True)
-                continue
 
             if event.kind == "ready":
                 peer_ski = sdk["normalize_ski"](event.payload.get("peer_ski"))
