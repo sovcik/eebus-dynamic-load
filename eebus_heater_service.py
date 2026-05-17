@@ -13,6 +13,7 @@ DISCOVERY_COMMANDS = {
     "nodeManagementUseCaseData",
 }
 PAIRING_TIMEOUT_SECONDS = 120
+DISCOVERY_TIMEOUT_SECONDS = 3.0
 PAIRING_CONFIRMATION_INPUTS = {"y", "yes"}
 
 
@@ -110,7 +111,7 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
 
 
 def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    selected_modes = int(bool(args.peer_ski)) + int(bool(args.pairing_wait)) + int(bool(args.pairing_ski))
+    selected_modes = sum(1 for flag in (args.peer_ski, args.pairing_wait, args.pairing_ski) if flag)
     if selected_modes == 0:
         parser.error("one mode is required: --peer-ski, --pairing-wait, or --pairing-ski")
     if selected_modes > 1:
@@ -125,7 +126,7 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
         return 1
 
     interface_ip = args.interface_ip or sdk["detect_interface_ip"]()
-    services = await asyncio.to_thread(sdk["discover_ship_services"], interface_ip, timeout=3.0)
+    services = await asyncio.to_thread(sdk["discover_ship_services"], interface_ip, timeout=DISCOVERY_TIMEOUT_SECONDS)
     service = next((entry for entry in services if sdk["normalize_ski"](entry.ski) == desired_ski), None)
     if service is None:
         print(f"Error: unable to discover HEMS device with SKI {desired_ski}.", flush=True)
@@ -180,9 +181,13 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
                 display_ski = normalized_ski or str(raw_ski or "UNKNOWN")
                 print(f"Pairing request received from SKI: {display_ski}", flush=True)
                 response = await asyncio.to_thread(input, f"Pair with SKI {display_ski}? [y/N]: ")
-                if response.strip().lower() in PAIRING_CONFIRMATION_INPUTS and normalized_ski is not None:
-                    selected_ski = normalized_ski
-                    print(f"Selected SKI {selected_ski}. Waiting for pairing to complete...", flush=True)
+                if response.strip().lower() not in PAIRING_CONFIRMATION_INPUTS:
+                    continue
+                if normalized_ski is None:
+                    print("Cannot pair: incoming request SKI is invalid.", flush=True)
+                    continue
+                selected_ski = normalized_ski
+                print(f"Selected SKI {selected_ski}. Waiting for pairing to complete...", flush=True)
 
             if event.kind == "ready":
                 peer_ski = sdk["normalize_ski"](event.payload.get("peer_ski"))
