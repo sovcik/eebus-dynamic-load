@@ -181,7 +181,7 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
                 normalized_ski = sdk["normalize_ski"](raw_ski)
                 display_ski = normalized_ski or str(raw_ski or "UNKNOWN")
                 print(f"Pairing request received from SKI: {display_ski}", flush=True)
-                response = await asyncio.to_thread(input, f"Pair with SKI {display_ski}? [y/N]: ")
+                response = await asyncio.to_thread(input, "Pair with this SKI? [y/N]: ")
                 if response.strip().lower() not in PAIRING_CONFIRMATION_INPUTS:
                     continue
                 if normalized_ski is None:

@@ -99,6 +99,8 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_pairing_wait_mode_confirms_and_completes(self) -> None:
+        test_ski = "AA"
+
         class FakeListener:
             def __init__(self) -> None:
                 self.started = False
@@ -111,8 +113,8 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.stopped = True
 
             async def events(self):
-                yield SimpleNamespace(kind="connected", payload={"peer_ski": "AA"})
-                yield SimpleNamespace(kind="ready", payload={"peer_ski": "AA"})
+                yield SimpleNamespace(kind="connected", payload={"peer_ski": test_ski})
+                yield SimpleNamespace(kind="ready", payload={"peer_ski": test_ski})
 
         class FakeAnnouncer:
             async def start(self) -> None:
@@ -136,7 +138,7 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(fake_runtime.listener.started)
         self.assertTrue(fake_runtime.listener.stopped)
-        mocked_print.assert_any_call("Pairing successful with SKI AA.", flush=True)
+        mocked_print.assert_any_call(f"Pairing successful with SKI {test_ski}.", flush=True)
 
 
 if __name__ == "__main__":
