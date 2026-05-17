@@ -112,7 +112,13 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
 
 
 def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    selected_modes = sum(1 for flag in (args.peer_ski, args.pairing_wait, args.pairing_ski) if flag)
+    selected_modes = sum(
+        (
+            1 if bool(args.peer_ski and str(args.peer_ski).strip()) else 0,
+            1 if args.pairing_wait else 0,
+            1 if bool(args.pairing_ski and str(args.pairing_ski).strip()) else 0,
+        )
+    )
     if selected_modes == 0:
         parser.error("one mode is required: --peer-ski, --pairing-wait, or --pairing-ski")
     if selected_modes > 1:
@@ -156,6 +162,10 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
 
 
 async def _pairing_wait_mode(args: argparse.Namespace) -> int:
+    def _pairing_timeout_result() -> int:
+        print(PAIRING_TIMEOUT_MESSAGE, flush=True)
+        return 1
+
     sdk = _load_sdk()
     runtime = build_runtime(args)
     selected_ski: str | None = None
@@ -168,13 +178,11 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                print(PAIRING_TIMEOUT_MESSAGE, flush=True)
-                return 1
+                return _pairing_timeout_result()
             try:
                 event = await asyncio.wait_for(anext(events), timeout=remaining)
             except TimeoutError:
-                print(PAIRING_TIMEOUT_MESSAGE, flush=True)
-                return 1
+                return _pairing_timeout_result()
 
             if event.kind == "connected":
                 raw_ski = event.payload.get("peer_ski")
@@ -183,6 +191,7 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
                 print(f"Pairing request received from SKI: {display_ski}", flush=True)
                 response = await asyncio.to_thread(input, "Pair with this SKI? [y/N]: ")
                 if response.strip().lower() not in PAIRING_CONFIRMATION_INPUTS:
+                    print("Pairing declined. Waiting for next request...", flush=True)
                     continue
                 if normalized_ski is None:
                     print("Cannot pair: incoming request SKI is invalid.", flush=True)

@@ -25,10 +25,18 @@ class ServiceHelpersTests(unittest.TestCase):
         rendered = format_lcp_message({"peer_ski": "abc", "watts": 2500})
         self.assertEqual(json.loads(rendered), {"peer_ski": "abc", "watts": 2500})
 
-    def test_validate_args_requires_single_mode(self) -> None:
+    def test_validate_args_requires_at_least_one_mode(self) -> None:
         parser = build_parser()
         with self.assertRaises(SystemExit):
             args = parser.parse_args(["--identity", "/tmp/identity.json"])
+            _validate_args(args, parser)
+
+    def test_validate_args_rejects_multiple_modes(self) -> None:
+        parser = build_parser()
+        with self.assertRaises(SystemExit):
+            args = parser.parse_args(
+                ["--identity", "/tmp/identity.json", "--peer-ski", "AABB", "--pairing-ski", "CCDD"]
+            )
             _validate_args(args, parser)
 
     def test_build_runtime_passes_coupled_peer_ski(self) -> None:
@@ -139,6 +147,38 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fake_runtime.listener.started)
         self.assertTrue(fake_runtime.listener.stopped)
         mocked_print.assert_any_call(f"Pairing successful with SKI {test_ski}.", flush=True)
+
+    async def test_pairing_wait_mode_times_out(self) -> None:
+        class FakeListener:
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
+            async def events(self):
+                if False:
+                    yield None
+
+        class FakeAnnouncer:
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
+        fake_runtime = SimpleNamespace(listener=FakeListener(), announcer=FakeAnnouncer())
+        args = SimpleNamespace()
+        fake_sdk = {"normalize_ski": lambda value: value}
+
+        with (
+            patch("eebus_heater_service._load_sdk", return_value=fake_sdk),
+            patch("eebus_heater_service.build_runtime", return_value=fake_runtime),
+            patch("eebus_heater_service.asyncio.wait_for", side_effect=TimeoutError),
+        ):
+            rc = await _pairing_wait_mode(args)
+
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":
