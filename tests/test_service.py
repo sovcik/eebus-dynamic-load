@@ -23,15 +23,15 @@ class ServiceHelpersTests(unittest.TestCase):
             parser.parse_args(["--identity", "/tmp/identity.json"])
 
     def test_build_runtime_passes_coupled_peer_ski(self) -> None:
-        captured_advertisement: dict[str, object] = {}
-        captured_server_config: dict[str, object] = {}
+        advertisement_kwargs: dict[str, object] = {}
+        server_config_kwargs: dict[str, object] = {}
 
         def fake_advertisement(**kwargs: object) -> SimpleNamespace:
-            captured_advertisement.update(kwargs)
+            advertisement_kwargs.update(kwargs)
             return SimpleNamespace(**kwargs)
 
         def fake_server_config(**kwargs: object) -> SimpleNamespace:
-            captured_server_config.update(kwargs)
+            server_config_kwargs.update(kwargs)
             return SimpleNamespace(**kwargs)
 
         fake_identity = SimpleNamespace(ski="SERVER_SKI", ship_id="SHIP_ID")
@@ -59,9 +59,9 @@ class ServiceHelpersTests(unittest.TestCase):
         with patch("eebus_heater_service._load_sdk", return_value=fake_sdk):
             runtime = build_runtime(args)
 
-        self.assertEqual(captured_advertisement["ski"], "SERVER_SKI")
+        self.assertEqual(advertisement_kwargs["ski"], "SERVER_SKI")
         self.assertEqual(
-            captured_server_config["trusted_client_skis"],
+            server_config_kwargs["trusted_client_skis"],
             ("11AA22BB33CC44DD55EE66FF77889900AABBCCDD",),
         )
         self.assertTrue(hasattr(runtime, "announcer"))

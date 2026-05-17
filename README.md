@@ -19,7 +19,7 @@ python eebus_heater_service.py \
 
 Options:
 
-- `--peer-ski` SKI of the coupled EEBus peer (required)
+- `--peer-ski`: SKI of the coupled EEBus peer (required)
 - `--bind-host` (default: `0.0.0.0`)
 - `--port` (default: `4712`)
 - `--path` (default: `/ship/`)
