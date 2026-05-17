@@ -15,6 +15,7 @@ DISCOVERY_COMMANDS = {
 PAIRING_TIMEOUT_SECONDS = 120
 DISCOVERY_TIMEOUT_SECONDS = 3.0
 PAIRING_CONFIRMATION_INPUTS = {"y", "yes"}
+PAIRING_TIMEOUT_MESSAGE = f"Pairing mode timeout after {PAIRING_TIMEOUT_SECONDS} seconds."
 
 
 @dataclass(slots=True)
@@ -167,12 +168,12 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                print(f"Pairing mode timeout after {PAIRING_TIMEOUT_SECONDS} seconds.", flush=True)
+                print(PAIRING_TIMEOUT_MESSAGE, flush=True)
                 return 1
             try:
                 event = await asyncio.wait_for(anext(events), timeout=remaining)
             except TimeoutError:
-                print(f"Pairing mode timeout after {PAIRING_TIMEOUT_SECONDS} seconds.", flush=True)
+                print(PAIRING_TIMEOUT_MESSAGE, flush=True)
                 return 1
 
             if event.kind == "connected":
