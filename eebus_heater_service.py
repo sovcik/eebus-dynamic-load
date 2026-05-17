@@ -100,7 +100,7 @@ async def run_service(args: argparse.Namespace) -> int:
         print(f"Service started on {args.bind_host}:{args.port}. Press Ctrl-C to stop.", flush=True)
         async for event in runtime.listener.events():
             if event.kind == "summary":
-                commands = [str(command) for command in event.payload.get("commands") or []]
+                commands = [str(command) for command in event.payload.get("commands", [])]
                 if is_discovery_commands(commands):
                     print(f"Discover message received: commands={','.join(commands)}", flush=True)
                 continue
