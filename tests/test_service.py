@@ -3,7 +3,15 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from eebus_heater_service import build_parser, build_runtime, format_lcp_message, is_discovery_commands
+from eebus_heater_service import (
+    _pair_with_ski,
+    _pairing_wait_mode,
+    _validate_args,
+    build_parser,
+    build_runtime,
+    format_lcp_message,
+    is_discovery_commands,
+)
 
 
 class ServiceHelpersTests(unittest.TestCase):
@@ -17,10 +25,19 @@ class ServiceHelpersTests(unittest.TestCase):
         rendered = format_lcp_message({"peer_ski": "abc", "watts": 2500})
         self.assertEqual(json.loads(rendered), {"peer_ski": "abc", "watts": 2500})
 
-    def test_parser_requires_peer_ski(self) -> None:
+    def test_validate_args_requires_at_least_one_mode(self) -> None:
         parser = build_parser()
         with self.assertRaises(SystemExit):
-            parser.parse_args(["--identity", "/tmp/identity.json"])
+            args = parser.parse_args(["--identity", "/tmp/identity.json"])
+            _validate_args(args, parser)
+
+    def test_validate_args_rejects_multiple_modes(self) -> None:
+        parser = build_parser()
+        with self.assertRaises(SystemExit):
+            args = parser.parse_args(
+                ["--identity", "/tmp/identity.json", "--peer-ski", "AABB", "--pairing-ski", "CCDD"]
+            )
+            _validate_args(args, parser)
 
     def test_build_runtime_passes_coupled_peer_ski(self) -> None:
         advertisement_kwargs: dict[str, object] = {}
@@ -66,6 +83,102 @@ class ServiceHelpersTests(unittest.TestCase):
         )
         self.assertTrue(hasattr(runtime, "announcer"))
         self.assertTrue(hasattr(runtime, "listener"))
+
+
+class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pair_with_ski_reports_error_when_service_not_found(self) -> None:
+        fake_sdk = {
+            "normalize_ski": lambda value: value,
+            "detect_interface_ip": lambda: "192.168.1.10",
+            "discover_ship_services": lambda *_args, **_kwargs: [],
+        }
+        args = SimpleNamespace(
+            pairing_ski="11AA22BB33CC44DD55EE66FF77889900AABBCCDD",
+            interface_ip=None,
+        )
+
+        with patch("eebus_heater_service._load_sdk", return_value=fake_sdk), patch("builtins.print") as mocked_print:
+            rc = await _pair_with_ski(args)
+
+        self.assertEqual(rc, 1)
+        mocked_print.assert_any_call(
+            "Error: unable to discover HEMS device with SKI 11AA22BB33CC44DD55EE66FF77889900AABBCCDD.",
+            flush=True,
+        )
+
+    async def test_pairing_wait_mode_confirms_and_completes(self) -> None:
+        test_ski = "AA"
+
+        class FakeListener:
+            def __init__(self) -> None:
+                self.started = False
+                self.stopped = False
+
+            async def start(self) -> None:
+                self.started = True
+
+            async def stop(self) -> None:
+                self.stopped = True
+
+            async def events(self):
+                yield SimpleNamespace(kind="connected", payload={"peer_ski": test_ski})
+                yield SimpleNamespace(kind="ready", payload={"peer_ski": test_ski})
+
+        class FakeAnnouncer:
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
+        fake_runtime = SimpleNamespace(listener=FakeListener(), announcer=FakeAnnouncer())
+        args = SimpleNamespace()
+        fake_sdk = {"normalize_ski": lambda value: value}
+
+        with (
+            patch("eebus_heater_service._load_sdk", return_value=fake_sdk),
+            patch("eebus_heater_service.build_runtime", return_value=fake_runtime),
+            patch("builtins.input", return_value="y"),
+            patch("builtins.print") as mocked_print,
+        ):
+            rc = await _pairing_wait_mode(args)
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(fake_runtime.listener.started)
+        self.assertTrue(fake_runtime.listener.stopped)
+        mocked_print.assert_any_call(f"Pairing successful with SKI {test_ski}.", flush=True)
+
+    async def test_pairing_wait_mode_times_out(self) -> None:
+        class FakeListener:
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
+            async def events(self):
+                if False:
+                    yield None
+
+        class FakeAnnouncer:
+            async def start(self) -> None:
+                return None
+
+            async def stop(self) -> None:
+                return None
+
+        fake_runtime = SimpleNamespace(listener=FakeListener(), announcer=FakeAnnouncer())
+        args = SimpleNamespace()
+        fake_sdk = {"normalize_ski": lambda value: value}
+
+        with (
+            patch("eebus_heater_service._load_sdk", return_value=fake_sdk),
+            patch("eebus_heater_service.build_runtime", return_value=fake_runtime),
+            patch("eebus_heater_service.asyncio.wait_for", side_effect=TimeoutError),
+        ):
+            rc = await _pairing_wait_mode(args)
+
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":
