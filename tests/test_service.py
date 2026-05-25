@@ -3,7 +3,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from eebus_heater_service import (
+from eebus_dyn_load_service import (
     _pair_with_ski,
     _pairing_wait_mode,
     _validate_args,
@@ -73,7 +73,7 @@ class ServiceHelpersTests(unittest.TestCase):
             server_name=None,
         )
 
-        with patch("eebus_heater_service._load_sdk", return_value=fake_sdk):
+        with patch("eebus_dyn_load_service._load_sdk", return_value=fake_sdk):
             runtime = build_runtime(args)
 
         self.assertEqual(advertisement_kwargs["ski"], "SERVER_SKI")
@@ -97,7 +97,7 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
             interface_ip=None,
         )
 
-        with patch("eebus_heater_service._load_sdk", return_value=fake_sdk), patch("builtins.print") as mocked_print:
+        with patch("eebus_dyn_load_service._load_sdk", return_value=fake_sdk), patch("builtins.print") as mocked_print:
             rc = await _pair_with_ski(args)
 
         self.assertEqual(rc, 1)
@@ -136,8 +136,8 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
         fake_sdk = {"normalize_ski": lambda value: value}
 
         with (
-            patch("eebus_heater_service._load_sdk", return_value=fake_sdk),
-            patch("eebus_heater_service.build_runtime", return_value=fake_runtime),
+            patch("eebus_dyn_load_service._load_sdk", return_value=fake_sdk),
+            patch("eebus_dyn_load_service.build_runtime", return_value=fake_runtime),
             patch("builtins.input", return_value="y"),
             patch("builtins.print") as mocked_print,
         ):
@@ -172,9 +172,9 @@ class PairingFlowTests(unittest.IsolatedAsyncioTestCase):
         fake_sdk = {"normalize_ski": lambda value: value}
 
         with (
-            patch("eebus_heater_service._load_sdk", return_value=fake_sdk),
-            patch("eebus_heater_service.build_runtime", return_value=fake_runtime),
-            patch("eebus_heater_service.asyncio.wait_for", side_effect=TimeoutError),
+            patch("eebus_dyn_load_service._load_sdk", return_value=fake_sdk),
+            patch("eebus_dyn_load_service.build_runtime", return_value=fake_runtime),
+            patch("eebus_dyn_load_service.asyncio.wait_for", side_effect=TimeoutError),
         ):
             rc = await _pairing_wait_mode(args)
 

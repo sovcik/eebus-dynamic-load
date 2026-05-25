@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from email.mime import message
 import json
 import socket
 from collections.abc import Iterable, Mapping
@@ -32,6 +33,7 @@ def _load_sdk() -> dict[str, Any]:
         from eebus_sdk.server import ShipServer, ShipServerConfig
         from eebus_sdk.ship import ShipConnectionConfig, ShipSession
         from eebus_sdk.trust import TrustStore
+        from eebus_sdk.trace import TraceLogger
     except ImportError as exc:  # pragma: no cover - exercised only when dependency is missing
         raise RuntimeError(
             "Missing dependency 'eebus-sdk'. Install dependencies with `python -m pip install -r requirements.txt`."
@@ -49,6 +51,7 @@ def _load_sdk() -> dict[str, Any]:
         "ShipConnectionConfig": ShipConnectionConfig,
         "ShipSession": ShipSession,
         "TrustStore": TrustStore,
+        "TraceLogger": TraceLogger,
     }
 
 
@@ -61,7 +64,7 @@ def format_lcp_message(payload: Mapping[str, Any]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="EEBus heater service")
+    parser = argparse.ArgumentParser(description="EEBus dynamic load service")
     parser.add_argument("--identity", required=True, help="Path to eebus-sdk identity.json")
     parser.add_argument("--peer-ski", help="SKI of the coupled EEBus peer")
     parser.add_argument(
@@ -75,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=4712, help="SHIP listener port")
     parser.add_argument("--path", default="/ship/", help="SHIP websocket path")
     parser.add_argument("--ship-id", help="Optional SHIP ID override")
-    parser.add_argument("--device-id", default="EEBUS-HEATER", help="Advertised device identifier")
+    parser.add_argument("--device-id", default="EEBUS-DYN-LOAD", help="Advertised device identifier")
     parser.add_argument("--instance-name", help="Optional DNS-SD instance name")
     parser.add_argument("--server-name", help="Optional advertised server name")
     return parser
@@ -85,6 +88,7 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
     sdk = _load_sdk()
     identity = sdk["IdentityStore"].load(args.identity)
     interface_ip = args.interface_ip or sdk["detect_interface_ip"]()
+    logger = sdk["TraceLogger"]("./eebus_dyn-load_service.log")
     announcer = sdk["ShipServiceAdvertiser"](
         sdk["ShipServiceAdvertisement"](
             interface_ip=interface_ip,
@@ -95,6 +99,7 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
             instance_name=args.instance_name,
             server_name=args.server_name or f"{socket.gethostname()}.local.",
             path=args.path,
+            trace_logger=logger,
         )
     )
     listener = sdk["ShipServer"](
@@ -106,6 +111,7 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
             path=args.path,
             device_id=args.device_id,
             trusted_client_skis=(args.peer_ski,) if args.peer_ski else (),
+            
         )
     )
     return RuntimeHandles(announcer=announcer, listener=listener)
@@ -133,10 +139,12 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
         return 1
 
     interface_ip = args.interface_ip or sdk["detect_interface_ip"]()
+    print(f"Discovering SHIP services on the network interface {interface_ip}...", flush=True)
     services = await asyncio.to_thread(sdk["discover_ship_services"], interface_ip, timeout=DISCOVERY_TIMEOUT_SECONDS)
+    print(f"Discovered {len(services)} SHIP services on the network. Looking for SKI {desired_ski}...", flush=True)
     service = next((entry for entry in services if sdk["normalize_ski"](entry.ski) == desired_ski), None)
+    print(f"Discovery complete. {'Found' if service else 'Did not find'} service with SKI {desired_ski}.", flush=True)
     if service is None:
-        print(f"Error: unable to discover HEMS device with SKI {desired_ski}.", flush=True)
         return 1
     if service.port is None:
         print(f"Error: discovered service for SKI {desired_ski} does not provide a SHIP port.", flush=True)
@@ -144,15 +152,19 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
 
     identity = sdk["IdentityStore"].load(args.identity)
     trust = sdk["TrustStore"].from_server_ski(desired_ski)
+    logger = sdk["TraceLogger"]("./eebus_dyn-load_pairing.log")
     config = sdk["ShipConnectionConfig"](
         host=service.preferred_host(),
         port=service.port,
         path=service.path,
         server_name=service.server_name(),
         pairing_wait_seconds=PAIRING_TIMEOUT_SECONDS,
+        
     )
+    print(f"Attempting to pair with SKI {desired_ski} at {config.host}:{config.port}{config.path}...", flush=True)
     try:
-        session = await sdk["ShipSession"].connect(config, identity, trust)
+        session = await sdk["ShipSession"].connect(config, identity, trust, trace_logger=logger)
+        await session.open()
         await session.close()
     except Exception as exc:
         print(f"Error: pairing failed for SKI {desired_ski}: {exc}", flush=True)
@@ -180,7 +192,7 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
             if remaining <= 0:
                 return _pairing_timeout_result()
             try:
-                event = await asyncio.wait_for(anext(events), timeout=remaining)
+                event = await asyncio.wait_for(next(events), timeout=remaining)
             except TimeoutError:
                 return _pairing_timeout_result()
 
