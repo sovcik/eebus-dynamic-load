@@ -27,7 +27,7 @@ class RuntimeHandles:
 
 def _load_sdk() -> dict[str, Any]:
     try:
-        from eebus_sdk import IdentityStore
+        from eebus_sdk import HemsClient, IdentityStore
         from eebus_sdk.advertisement import ShipServiceAdvertiser, ShipServiceAdvertisement
         from eebus_sdk.discovery import detect_interface_ip, discover_ship_services, normalize_ski
         from eebus_sdk.server import ShipServer, ShipServerConfig
@@ -40,6 +40,7 @@ def _load_sdk() -> dict[str, Any]:
         ) from exc
 
     return {
+        "HemsClient": HemsClient,
         "IdentityStore": IdentityStore,
         "detect_interface_ip": detect_interface_ip,
         "discover_ship_services": discover_ship_services,
@@ -153,22 +154,34 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
     identity = sdk["IdentityStore"].load(args.identity)
     trust = sdk["TrustStore"].from_server_ski(desired_ski)
     logger = sdk["TraceLogger"]("./eebus_dyn-load_pairing.log")
-    config = sdk["ShipConnectionConfig"](
-        host=service.preferred_host(),
-        port=service.port,
-        path=service.path,
-        server_name=service.server_name(),
-        pairing_wait_seconds=PAIRING_TIMEOUT_SECONDS,
-        
-    )
-    print(f"Attempting to pair with SKI {desired_ski} at {config.host}:{config.port}{config.path}...", flush=True)
+
+    print(f"Attempting to pair with SKI {desired_ski} at "
+          f"{service.preferred_host()}:{service.port}{service.path}...", flush=True)
     try:
-        session = await sdk["ShipSession"].connect(config, identity, trust, trace_logger=logger)
-        await session.close()
+        client = await sdk["HemsClient"].connect(
+            service, identity, trust,
+            interface_ip=interface_ip,
+            trace_logger=logger,
+            pairing_wait_seconds=PAIRING_TIMEOUT_SECONDS,
+            profile="cls-adapter",      # dynamic load = Controllable Local System / LoadControl server
+        )
     except Exception as exc:
         print(f"Error: pairing failed for SKI {desired_ski}: {exc}", flush=True)
         return 1
-    print(f"Pairing successful with SKI {desired_ski}.", flush=True)
+
+    try:
+        # SHIP handshake is done. Now run the SPINE NodeManagement exchange (SPINE TS 7.1)
+        # so the peer can discover and register this device, and STAY connected.
+        await client.bootstrap_spine(timeout=DISCOVERY_TIMEOUT_SECONDS)
+        await client.request_remote_detailed_discovery(timeout=PAIRING_TIMEOUT_SECONDS)
+        print(f"Paired with SKI {desired_ski}; connection open so the peer can finish "
+              f"discovery. Press Ctrl-C to stop.", flush=True)
+        # Keep servicing the peer: bootstrap_spine() processes + auto-replies to incoming
+        # reads (and answers WebSocket pings inside receive_frame), keeping us "present".
+        while True:
+            await client.bootstrap_spine(timeout=DISCOVERY_TIMEOUT_SECONDS)
+    finally:
+        await client.close()
     return 0
 
 
