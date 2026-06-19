@@ -1,9 +1,0 @@
-{
-  "ship_id": "i:32266_u:LY21JS_r:DYNLOAD",
-  "device_id": "LY21JS",
-  "common_name": "LY21JS.cls",
-  "ski": "3a6bad10c9a76f656255d9301b574b82ad23a41d",
-  "cert_path": "/home/jozef/projects/eebus-heater/.local/client.crt.pem",
-  "key_path": "/home/jozef/projects/eebus-heater/.local/client.key.pem",
-  "qr_payload": "ID:i:32266_u:LY21JS_r:DYNLOAD;SKI:3A6B AD10 C9A7 6F65 6255 D930 1B57 4B82 AD23 A41D;BRAND:HEMS;TYPE:Generic;MODEL:2.5kW heater;"
-}
