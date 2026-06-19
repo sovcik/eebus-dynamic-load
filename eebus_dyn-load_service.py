@@ -164,7 +164,6 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
     print(f"Attempting to pair with SKI {desired_ski} at {config.host}:{config.port}{config.path}...", flush=True)
     try:
         session = await sdk["ShipSession"].connect(config, identity, trust, trace_logger=logger)
-        await session.open()
         await session.close()
     except Exception as exc:
         print(f"Error: pairing failed for SKI {desired_ski}: {exc}", flush=True)
