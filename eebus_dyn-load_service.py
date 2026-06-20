@@ -32,6 +32,7 @@ def _load_sdk() -> dict[str, Any]:
         from eebus_sdk.discovery import detect_interface_ip, discover_ship_services, normalize_ski
         from eebus_sdk.server import ShipServer, ShipServerConfig
         from eebus_sdk.ship import ShipConnectionConfig, ShipSession
+        from eebus_sdk.spine import extract_commands, extract_header
         from eebus_sdk.trust import TrustStore
         from eebus_sdk.trace import TraceLogger
     except ImportError as exc:  # pragma: no cover - exercised only when dependency is missing
@@ -51,6 +52,8 @@ def _load_sdk() -> dict[str, Any]:
         "ShipServerConfig": ShipServerConfig,
         "ShipConnectionConfig": ShipConnectionConfig,
         "ShipSession": ShipSession,
+        "extract_commands": extract_commands,
+        "extract_header": extract_header,
         "TrustStore": TrustStore,
         "TraceLogger": TraceLogger,
     }
@@ -62,6 +65,21 @@ def is_discovery_commands(commands: Iterable[str]) -> bool:
 
 def format_lcp_message(payload: Mapping[str, Any]) -> str:
     return json.dumps(dict(payload), sort_keys=True)
+
+
+def _print_inbound_lcp(sdk: dict[str, Any], datagrams: Iterable[Any]) -> None:
+    """Log any inbound loadControlLimitListData (LCP/LPC limit) writes from the peer."""
+    for datagram in datagrams:
+        try:
+            if sdk["extract_header"](datagram).get("cmdClassifier") != "write":
+                continue
+            commands = sdk["extract_commands"](datagram)
+        except ValueError:
+            continue
+        for command in commands:
+            limit = command.get("loadControlLimitListData")
+            if limit is not None:
+                print(f"LCP message received: {format_lcp_message(limit)}", flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -100,7 +118,6 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
             instance_name=args.instance_name,
             server_name=args.server_name or f"{socket.gethostname()}.local.",
             path=args.path,
-            trace_logger=logger,
         )
     )
     listener = sdk["ShipServer"](
@@ -112,8 +129,10 @@ def build_runtime(args: argparse.Namespace) -> RuntimeHandles:
             path=args.path,
             device_id=args.device_id,
             trusted_client_skis=(args.peer_ski,) if args.peer_ski else (),
+            spine_profile="cls-load-power",
             
-        )
+        ),
+        trace_logger=logger,
     )
     return RuntimeHandles(announcer=announcer, listener=listener)
 
@@ -144,14 +163,17 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
     services = await asyncio.to_thread(sdk["discover_ship_services"], interface_ip, timeout=DISCOVERY_TIMEOUT_SECONDS)
     print(f"Discovered {len(services)} SHIP services on the network. Looking for SKI {desired_ski}...", flush=True)
     service = next((entry for entry in services if sdk["normalize_ski"](entry.ski) == desired_ski), None)
-    print(f"Discovery complete. {'Found' if service else 'Did not find'} service with SKI {desired_ski}.", flush=True)
     if service is None:
+        print(f"Error: unable to discover HEMS device with SKI {desired_ski}.", flush=True)
         return 1
+    print(f"Discovery complete. Found service with SKI {desired_ski}.", flush=True)
     if service.port is None:
         print(f"Error: discovered service for SKI {desired_ski} does not provide a SHIP port.", flush=True)
         return 1
 
     identity = sdk["IdentityStore"].load(args.identity)
+    if args.ship_id:
+        identity.ship_id = args.ship_id  # honor --ship-id override in outbound pairing too
     trust = sdk["TrustStore"].from_server_ski(desired_ski)
     logger = sdk["TraceLogger"]("./eebus_dyn-load_pairing.log")
 
@@ -173,13 +195,23 @@ async def _pair_with_ski(args: argparse.Namespace) -> int:
         # SHIP handshake is done. Now run the SPINE NodeManagement exchange (SPINE TS 7.1)
         # so the peer can discover and register this device, and STAY connected.
         await client.bootstrap_spine(timeout=DISCOVERY_TIMEOUT_SECONDS)
-        await client.request_remote_detailed_discovery(timeout=PAIRING_TIMEOUT_SECONDS)
+        try:
+            await client.request_remote_detailed_discovery(timeout=DISCOVERY_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            pass  # controller-side peers (e.g. SMA) read from us but need not expose their own discovery
         print(f"Paired with SKI {desired_ski}; connection open so the peer can finish "
               f"discovery. Press Ctrl-C to stop.", flush=True)
         # Keep servicing the peer: bootstrap_spine() processes + auto-replies to incoming
         # reads (and answers WebSocket pings inside receive_frame), keeping us "present".
         while True:
-            await client.bootstrap_spine(timeout=DISCOVERY_TIMEOUT_SECONDS)
+            received = await client.bootstrap_spine(timeout=DISCOVERY_TIMEOUT_SECONDS)
+            _print_inbound_lcp(sdk, received)
+    except Exception as exc:
+        # e.g. SMA closes with code 4450 "SHIP id mismatch": the SKI is trusted but the
+        # SHIP ID we present differs from the one registered on the controller. Re-pair on
+        # the controller, or present the registered SHIP ID via --ship-id / identity.json.
+        print(f"Error: peer closed the SHIP session during pairing: {exc}", flush=True)
+        return 1
     finally:
         await client.close()
     return 0
@@ -204,7 +236,7 @@ async def _pairing_wait_mode(args: argparse.Namespace) -> int:
             if remaining <= 0:
                 return _pairing_timeout_result()
             try:
-                event = await asyncio.wait_for(next(events), timeout=remaining)
+                event = await asyncio.wait_for(anext(events), timeout=remaining)
             except TimeoutError:
                 return _pairing_timeout_result()
 

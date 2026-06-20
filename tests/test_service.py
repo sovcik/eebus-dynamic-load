@@ -1,7 +1,23 @@
-import unittest
+import importlib.util
 import json
+import sys
+import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+# The service file is named "eebus_dyn-load_service.py" (hyphen), which is not a valid
+# Python module name. Load it explicitly and register it under an importable alias so the
+# imports below and the unittest.mock.patch("eebus_dyn_load_service.*") targets resolve
+# under both `unittest` and `pytest`.
+if "eebus_dyn_load_service" not in sys.modules:
+    _spec = importlib.util.spec_from_file_location(
+        "eebus_dyn_load_service",
+        Path(__file__).resolve().parent.parent / "eebus_dyn-load_service.py",
+    )
+    _module = importlib.util.module_from_spec(_spec)
+    sys.modules["eebus_dyn_load_service"] = _module
+    _spec.loader.exec_module(_module)
 
 from eebus_dyn_load_service import (
     _pair_with_ski,
@@ -55,9 +71,10 @@ class ServiceHelpersTests(unittest.TestCase):
         fake_sdk = {
             "IdentityStore": SimpleNamespace(load=lambda _path: fake_identity),
             "detect_interface_ip": lambda: "192.168.1.10",
+            "TraceLogger": lambda *_args, **_kwargs: SimpleNamespace(),
             "ShipServiceAdvertiser": lambda advertisement: SimpleNamespace(advertisement=advertisement),
             "ShipServiceAdvertisement": fake_advertisement,
-            "ShipServer": lambda config: SimpleNamespace(config=config),
+            "ShipServer": lambda config, trace_logger=None: SimpleNamespace(config=config),
             "ShipServerConfig": fake_server_config,
         }
         args = SimpleNamespace(
